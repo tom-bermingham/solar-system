@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solar System Visualization</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Use mouse wheel to zoom, drag to rotate</div>
+    <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.159.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.159.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { TextureLoader } from 'three';
+
+        // Initialize Three.js
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({
+            antialias: true,  // Enable antialiasing
+            alpha: false      // Remove alpha to keep black background
+        });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0x000000);  // Set clear color to black
+        document.body.appendChild(renderer.domElement);
+
+        // Add texture loading manager
+        const loadingManager = new THREE.LoadingManager();
+        loadingManager.onError = function(url) {
+            console.error('Error loading texture:', url);
+        };
+        
+        const textureLoader = new TextureLoader(loadingManager);
+
+        // Create star sprite texture for round points
+        const starCanvas = document.createElement('canvas');
+        const starCtx = starCanvas.getContext('2d');
+        starCanvas.width = 32;
+        starCanvas.height = 32;
+        
+        // Draw the star (white circle with gradient)
+        const gradient = starCtx.createRadialGradient(16, 16, 0, 16, 16, 16);
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+        gradient.addColorStop(0.4, 'rgba(255, 255, 255, 0.8)');
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        starCtx.fillStyle = gradient;
+        starCtx.fillRect(0, 0, 32, 32);
+        
+        const starTexture = new THREE.CanvasTexture(starCanvas);
+
+        // Add stars background with minimum distance from center
+        const starsGeometry = new THREE.BufferGeometry();
+        const starsVertices = [];
+        const starColors = [];  // Add color array for variation
+        const minDistance = 200;
+        const maxDistance = 1000;
+
+        for(let i = 0; i < 10000; i++) {
+            let x, y, z, distance;
+            
+            do {
+                x = Math.random() * 2000 - 1000;
+                y = Math.random() * 2000 - 1000;
+                z = Math.random() * 2000 - 1000;
+                distance = Math.sqrt(x*x + y*y + z*z);
+            } while (distance < minDistance || distance > maxDistance);
+
+            starsVertices.push(x, y, z);
+            
+            // Add slight color variation to stars
+            const intensity = 0.8 + Math.random() * 0.2;
+            starColors.push(intensity, intensity, intensity);
+        }
+
+        starsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starsVertices, 3));
+        starsGeometry.setAttribute('color', new THREE.Float32BufferAttribute(starColors, 3));
+
+        const starsMaterial = new THREE.PointsMaterial({
+            size: 2,
+            map: starTexture,
+            transparent: true,
+            alphaTest: 0.001,
+            vertexColors: true,
+            blending: THREE.AdditiveBlending,
+            sizeAttenuation: true
+        });
+
+        const starField = new THREE.Points(starsGeometry, starsMaterial);
+        scene.add(starField);
+
+        // Create Sun with increased emission
+        const sunGeometry = new THREE.SphereGeometry(2.5, 32, 32);
+        const sunTexture = textureLoader.load('./textures/8k_sun.jpg');
+        const sunMaterial = new THREE.MeshBasicMaterial({
+            map: sunTexture,
+            color: 0xffffff,
+            emissive: 0xffff33,
+            emissiveIntensity: 5
+        });
+        const sun = new THREE.Mesh(sunGeometry, sunMaterial);
+
+        // Add sun glow
+        const sunGlowGeometry = new THREE.SphereGeometry(2.75, 32, 32);
+        const sunGlowMaterial = new THREE.ShaderMaterial({
+            transparent: true,
+            uniforms: {
+                c: { type: "f", value: 0.5 },
+                p: { type: "f", value: 4.5 },
+                glowColor: { type: "c", value: new THREE.Color(0xffff00) },
+            },
+            vertexShader: `
+                varying vec3 vNormal;
+                void main() {
+                    vNormal = normalize(normalMatrix * normal);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 glowColor;
+                uniform float c;
+                uniform float p;
+                varying vec3 vNormal;
+                void main() {
+                    float intensity = pow(c - dot(vNormal, vec3(0.0, 0.0, 1.0)), p);
+                    gl_FragColor = vec4(glowColor, intensity);
+                }
+            `,
+            side: THREE.BackSide,
+            blending: THREE.AdditiveBlending
+        });
+        const sunGlow = new THREE.Mesh(sunGlowGeometry, sunGlowMaterial);
+        scene.add(sunGlow);
+        scene.add(sun);
+
+        // Add lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.1);
+        scene.add(ambientLight);
+        
+        const sunLight = new THREE.PointLight(0xffffff, 500, 2000);
+        sunLight.position.set(0, 0, 0);
+        sunLight.decay = 1.5;
+        scene.add(sunLight);
+
+        // Planet data with moons and rings
+        const planets = [
+            { name: 'Mercury', size: 0.4, orbit: 8, speed: 0.008/3, orbitOffset: Math.PI * 0.5, color: 0x8B8B8B, moons: [], textureUrl: './textures/8k_mercury.jpg' },
+            { name: 'Venus', size: 0.6, orbit: 15, speed: 0.003/3, orbitOffset: Math.PI * 1.2, color: 0xFFA500, moons: [], textureUrl: './textures/8k_venus_surface.jpg' },
+            { name: 'Earth', size: 0.75, orbit: 22, speed: 0.002/3, orbitOffset: Math.PI * 0.8, color: 0x0000FF, moons: [
+                { name: 'Moon', size: 0.2, orbit: 3, speed: 0.01/3, orbitOffset: Math.PI * 0.3, color: 0xDDDDDD }
+            ], textureUrl: './textures/8k_earth_daymap.jpg' },
+            { name: 'Mars', size: 0.5, orbit: 30, speed: 0.0016/3, orbitOffset: Math.PI * 1.6, color: 0xFF0000, moons: [
+                { name: 'Phobos', size: 0.1, orbit: 2, speed: 0.012/3, orbitOffset: Math.PI * 0.7, color: 0xCCCCCC },
+                { name: 'Deimos', size: 0.075, orbit: 2.5, speed: 0.008/3, orbitOffset: Math.PI * 1.3, color: 0xCCCCCC }
+            ], textureUrl: './textures/8k_mars.jpg' },
+            { name: 'Jupiter', size: 1.5, orbit: 65, speed: 0.0004/3, orbitOffset: Math.PI * 0.3, color: 0xFFA07A, moons: [
+                { name: 'Io', size: 0.15, orbit: 4, speed: 0.008/3, orbitOffset: Math.PI * 0.2, color: 0xFFFF00 },
+                { name: 'Europa', size: 0.125, orbit: 4.5, speed: 0.007/3, orbitOffset: Math.PI * 0.8, color: 0xFFFFFF },
+                { name: 'Ganymede', size: 0.175, orbit: 5, speed: 0.006/3, orbitOffset: Math.PI * 1.4, color: 0xBBBBBB },
+                { name: 'Callisto', size: 0.165, orbit: 5.5, speed: 0.005/3, orbitOffset: Math.PI * 1.9, color: 0x888888 }
+            ], textureUrl: './textures/8k_jupiter.jpg' },
+            { name: 'Saturn', size: 1.25, orbit: 95, speed: 0.00018/3, orbitOffset: Math.PI * 1.1, color: 0xFFD700, rings: {
+                inner: 1.5, outer: 3, color: 0xAA9977
+            }, moons: [
+                { name: 'Titan', size: 0.2, orbit: 7, speed: 0.004/3, orbitOffset: Math.PI * 0.6, color: 0xFFAA00 }
+            ], textureUrl: './textures/8k_saturn.jpg' },
+            { name: 'Uranus', size: 1, orbit: 135, speed: 0.00008/3, orbitOffset: Math.PI * 0.4, color: 0x00FFFF, moons: [
+                { name: 'Titania', size: 0.1, orbit: 3, speed: 0.006/3, orbitOffset: Math.PI * 1.7, color: 0xCCCCCC }
+            ], textureUrl: './textures/2k_uranus.jpg' },
+            { name: 'Neptune', size: 1, orbit: 175, speed: 0.00002/3, orbitOffset: Math.PI * 1.8, color: 0x0000CD, moons: [
+                { name: 'Triton', size: 0.15, orbit: 3.5, speed: 0.007/3, orbitOffset: Math.PI * 0.9, color: 0xCCCCCC }
+            ], textureUrl: './textures/2k_neptune.jpg' }
+        ];
+
+        // Create text sprite function
+        function createLabel(text, isMain = true) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 1024;
+            canvas.height = 256;
+            
+            // Clear the background to be fully transparent
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            
+            context.font = isMain ? '96px Arial' : '64px Arial';
+            context.fillStyle = 'white';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText(text, canvas.width/2, canvas.height/2);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.minFilter = THREE.LinearFilter;
+            texture.magFilter = THREE.LinearFilter;
+            
+            const spriteMaterial = new THREE.SpriteMaterial({ 
+                map: texture,
+                transparent: true,
+                depthTest: false,
+                depthWrite: false
+            });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.scale.set(isMain ? 10 : 5, isMain ? 2.5 : 1.25, 1);
+            
+            // Add user data to make label clickable
+            sprite.userData = { isLabel: true };
+            
+            return sprite;
+        }
+
+        // Create planets with moons and labels
+        const planetMeshes = planets.map(planet => {
+            const planetGroup = new THREE.Group();
+            
+            // Create planet with more segments
+            const geometry = new THREE.SphereGeometry(planet.size, 128, 128);  // Increased from 64
+            let material;
+            
+            // Add error handling for texture loading
+            const texture = textureLoader.load(
+                planet.textureUrl,
+                function(texture) {
+                    console.log(`${planet.name} texture loaded successfully`);
+                },
+                undefined,
+                function(err) {
+                    console.error(`Error loading ${planet.name} texture:`, err);
+                    // Fallback to basic material if texture fails to load
+                    material.color.setHex(planet.color);
+                }
+            );
+            material = new THREE.MeshStandardMaterial({ 
+                map: texture,
+                bumpMap: texture,
+                bumpScale: 0.05,
+                roughness: 0.8,
+                metalness: 0.0,
+                color: 0xffffff
+            });
+            
+            const sphere = new THREE.Mesh(geometry, material);
+            planetGroup.add(sphere);
+
+            // Add label
+            const label = createLabel(planet.name, true);
+            label.position.y = planet.size + 2;
+            label.userData.targetObject = sphere;  // Reference to the planet mesh
+            planetGroup.add(label);
+            
+            // Create Saturn's rings
+            if (planet.rings) {
+                // Create multiple rings with different properties
+                const ringGroups = [
+                    { inner: 1.5, outer: 1.7, color: 0xAA9977, opacity: 0.6 },  // Inner dense ring
+                    { inner: 1.7, outer: 2.0, color: 0x997755, opacity: 0.5 },  // Middle ring
+                    { inner: 2.0, outer: 2.3, color: 0xCCBB99, opacity: 0.4 },  // Outer bright ring
+                    { inner: 2.3, outer: 2.6, color: 0x887766, opacity: 0.3 },  // Faint outer ring
+                    { inner: 2.6, outer: 3.0, color: 0x665544, opacity: 0.2 }   // Very faint outer edge
+                ];
+
+                ringGroups.forEach(ring => {
+                    const ringsGeometry = new THREE.RingGeometry(
+                        ring.inner,
+                        ring.outer,
+                        180,  // Segments around the ring
+                        1,    // Radial segments
+                        0,    // Start angle
+                        Math.PI * 2 // End angle
+                    );
+
+                    const ringsMaterial = new THREE.MeshBasicMaterial({
+                        color: ring.color,
+                        side: THREE.DoubleSide,
+                        transparent: true,
+                        opacity: ring.opacity,
+                        depthWrite: false  // Prevents transparency sorting issues
+                    });
+
+                    const rings = new THREE.Mesh(ringsGeometry, ringsMaterial);
+                    rings.rotation.x = Math.PI / 2;
+                    planetGroup.add(rings);
+                });
+            }
+
+            // Create planet orbit line using Line instead of Mesh
+            const orbitPoints = [];
+            const orbitSegments = 256;  // More segments for smoother orbit line
+            for (let i = 0; i <= orbitSegments; i++) {
+                const angle = (i / orbitSegments) * Math.PI * 2;
+                orbitPoints.push(
+                    Math.cos(angle) * planet.orbit,
+                    0,
+                    Math.sin(angle) * planet.orbit
+                );
+            }
+            const orbitGeometry = new THREE.BufferGeometry();
+            orbitGeometry.setAttribute('position', new THREE.Float32BufferAttribute(orbitPoints, 3));
+            const orbitMaterial = new THREE.LineBasicMaterial({
+                color: planet.color,
+                transparent: true,
+                opacity: 0.5,
+                linewidth: 1
+            });
+            const orbit = new THREE.Line(orbitGeometry, orbitMaterial);
+            scene.add(orbit);
+
+            // Create moons
+            const moons = planet.moons.map(moon => {
+                const moonGroup = new THREE.Group();
+                const moonGeometry = new THREE.SphereGeometry(moon.size, 32, 32);  // Increased from 16
+                const moonMaterial = new THREE.MeshStandardMaterial({
+                    color: moon.color,
+                    roughness: 0.8,
+                    metalness: 0.0
+                });
+                const moonMesh = new THREE.Mesh(moonGeometry, moonMaterial);
+                
+                // Add moon label
+                const moonLabel = createLabel(moon.name, false);
+                moonLabel.position.y = moon.size + 1;
+                moonLabel.userData.targetObject = moonMesh;  // Reference to the moon mesh
+                moonMesh.add(moonLabel);
+                
+                // Create moon orbit line using Line
+                const moonOrbitPoints = [];
+                const moonOrbitSegments = 128;
+                for (let i = 0; i <= moonOrbitSegments; i++) {
+                    const angle = (i / moonOrbitSegments) * Math.PI * 2;
+                    moonOrbitPoints.push(
+                        Math.cos(angle) * moon.orbit,
+                        0,
+                        Math.sin(angle) * moon.orbit
+                    );
+                }
+                const moonOrbitGeometry = new THREE.BufferGeometry();
+                moonOrbitGeometry.setAttribute('position', new THREE.Float32BufferAttribute(moonOrbitPoints, 3));
+                const moonOrbitMaterial = new THREE.LineBasicMaterial({
+                    color: moon.color,
+                    transparent: true,
+                    opacity: 0.3
+                });
+                const moonOrbit = new THREE.Line(moonOrbitGeometry, moonOrbitMaterial);
+                planetGroup.add(moonOrbit);
+                
+                moonGroup.add(moonMesh);
+                planetGroup.add(moonGroup);
+                return { mesh: moonMesh, group: moonGroup, ...moon };
+            });
+            
+            // Make planet clickable
+            sphere.userData = { type: 'planet', name: planet.name };
+            sphere.addEventListener('click', onObjectClick);
+            
+            return {
+                group: planetGroup,
+                mesh: sphere,
+                moons,
+                orbit: planet.orbit,
+                speed: planet.speed,
+                orbitOffset: planet.orbitOffset
+            };
+        });
+
+        // Add a variable to track the currently focused object
+        let focusedObject = null;
+
+        // Click handler function
+        function onObjectClick(event) {
+            const object = event.target;
+            focusedObject = object;  // Store the clicked object
+            const position = new THREE.Vector3();
+            object.getWorldPosition(position);
+            
+            // Smoothly transition controls target and camera position
+            const startTarget = controls.target.clone();
+            const endTarget = position.clone();
+            const startPosition = camera.position.clone();
+            const distance = object.geometry.parameters.radius * 8;
+            const endPosition = position.clone().add(new THREE.Vector3(distance, distance/2, distance));
+            
+            let startTime = null;
+            const duration = 2000; // 2 seconds
+
+            function animateTransition(currentTime) {
+                if (!startTime) startTime = currentTime;
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                
+                // Use easing function for smoother transition
+                const easeProgress = 1 - Math.pow(1 - progress, 3);
+                
+                // Get current position of the object (which might have moved)
+                const currentPosition = new THREE.Vector3();
+                object.getWorldPosition(currentPosition);
+                
+                // Update controls target to current object position
+                const currentTarget = currentPosition.clone();
+                controls.target.lerpVectors(startTarget, currentTarget, easeProgress);
+                
+                // Update camera position relative to current object position
+                const currentEndPosition = currentPosition.clone().add(new THREE.Vector3(distance, distance/2, distance));
+                camera.position.lerpVectors(startPosition, currentEndPosition, easeProgress);
+                
+                if (progress < 1) {
+                    requestAnimationFrame(animateTransition);
+                }
+            }
+            
+            requestAnimationFrame(animateTransition);
+        }
+
+        // Add raycaster for click detection
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        window.addEventListener('click', (event) => {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(scene.children, true);
+
+            if (intersects.length > 0) {
+                const object = intersects[0].object;
+                if (object.type === 'Mesh' && object.geometry.type === 'SphereGeometry') {
+                    onObjectClick({ target: object });
+                } else if (object.userData.isLabel) {
+                    // If label is clicked, focus on its target object
+                    onObjectClick({ target: object.userData.targetObject });
+                }
+            }
+        });
+
+        // Add cursor change on hover
+        window.addEventListener('mousemove', (event) => {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(scene.children, true);
+
+            if (intersects.length > 0) {
+                const object = intersects[0].object;
+                if ((object.type === 'Mesh' && object.geometry.type === 'SphereGeometry') || 
+                    object.userData.isLabel) {
+                    document.body.style.cursor = 'pointer';
+                } else {
+                    document.body.style.cursor = 'default';
+                }
+            } else {
+                document.body.style.cursor = 'default';
+            }
+        });
+
+        // Position camera
+        camera.position.z = 100;
+
+        // Add orbit controls with reduced zoom speed
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.zoomSpeed = 0.3;  // Default is 1.0
+        controls.minDistance = 10;  // Prevent zooming too close
+        controls.maxDistance = 500;  // Prevent zooming too far out
+
+        // Animation loop
+        let time = 0;
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Update planet and moon positions
+            planetMeshes.forEach((planet, index) => {
+                const planetX = Math.cos(time * planet.speed + planet.orbitOffset) * planet.orbit;
+                const planetZ = Math.sin(time * planet.speed + planet.orbitOffset) * planet.orbit;
+                
+                planet.group.position.set(planetX, 0, planetZ);
+                scene.add(planet.group);
+
+                // Update moon positions
+                planet.moons.forEach(moon => {
+                    const moonX = Math.cos(time * moon.speed + moon.orbitOffset) * moon.orbit;
+                    const moonZ = Math.sin(time * moon.speed + moon.orbitOffset) * moon.orbit;
+                    moon.group.position.set(moonX, 0, moonZ);
+                });
+            });
+
+            // Update controls target and camera position to follow focused object
+            if (focusedObject) {
+                const position = new THREE.Vector3();
+                focusedObject.getWorldPosition(position);
+                
+                // Calculate the relative offset of the camera from the target
+                const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+                
+                // Update the target to the object's new position
+                controls.target.copy(position);
+                
+                // Move the camera to maintain the same relative position
+                camera.position.copy(position).add(offset);
+            }
+
+            time += 1;
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html> 
