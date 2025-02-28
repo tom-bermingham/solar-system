@@ -110,6 +110,64 @@
         const starField = new THREE.Points(starsGeometry, starsMaterial);
         scene.add(starField);
 
+        // Create asteroid belt
+        const asteroidBeltGeometry = new THREE.BufferGeometry();
+        const asteroidPositions = [];
+        const asteroidSizes = [];
+        const asteroidCount = 2000;
+        const beltInnerRadius = 35;  // Just outside Mars' orbit
+        const beltOuterRadius = 60;  // Just before Jupiter's orbit
+        const beltThickness = 2;     // Vertical spread
+
+        for(let i = 0; i < asteroidCount; i++) {
+            // Random radius within belt bounds
+            const radius = beltInnerRadius + Math.random() * (beltOuterRadius - beltInnerRadius);
+            // Random angle around the sun
+            const theta = Math.random() * Math.PI * 2;
+            // Random height within belt thickness
+            const y = (Math.random() - 0.5) * beltThickness;
+            
+            // Convert to Cartesian coordinates
+            const x = radius * Math.cos(theta);
+            const z = radius * Math.sin(theta);
+            
+            asteroidPositions.push(x, y, z);
+            // Random size for each asteroid
+            asteroidSizes.push(0.1 + Math.random() * 0.2);
+        }
+
+        asteroidBeltGeometry.setAttribute('position', 
+            new THREE.Float32BufferAttribute(asteroidPositions, 3));
+        asteroidBeltGeometry.setAttribute('size', 
+            new THREE.Float32BufferAttribute(asteroidSizes, 1));
+
+        // Create a custom shader material for the asteroids
+        const asteroidMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                color: { value: new THREE.Color(0x888888) }
+            },
+            vertexShader: `
+                attribute float size;
+                void main() {
+                    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                    gl_PointSize = size * (300.0 / -mvPosition.z);
+                    gl_Position = projectionMatrix * mvPosition;
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 color;
+                void main() {
+                    if (length(gl_PointCoord - vec2(0.5)) > 0.5) discard;
+                    gl_FragColor = vec4(color, 1.0);
+                }
+            `,
+            transparent: true,
+            depthWrite: false
+        });
+
+        const asteroidBelt = new THREE.Points(asteroidBeltGeometry, asteroidMaterial);
+        scene.add(asteroidBelt);
+
         // Create Sun with increased emission
         const sunGeometry = new THREE.SphereGeometry(2.5, 32, 32);
         const sunTexture = textureLoader.load('./textures/8k_sun.jpg');
@@ -518,6 +576,9 @@
                 // Move the camera to maintain the same relative position
                 camera.position.copy(position).add(offset);
             }
+
+            // Rotate asteroid belt slowly
+            asteroidBelt.rotation.y += 0.0001;
 
             time += 1;
             controls.update();

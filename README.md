@@ -18,6 +18,7 @@ A web-based 3D visualization of our solar system built with Three.js, featuring 
   - Planet and moon labels
   - Orbital paths
   - Starfield background
+  - Asteroid belt between Mars and Jupiter
 
 ## Technical Details
 
